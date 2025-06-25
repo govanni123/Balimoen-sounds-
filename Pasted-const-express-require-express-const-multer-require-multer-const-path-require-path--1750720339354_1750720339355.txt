@@ -1,0 +1,117 @@
+const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const session = require("express-session");
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+const PASSWORD = "balimoen123";
+
+app.use(session({
+  secret: "balimoen_secret_key",
+  resave: false,
+  saveUninitialized: false,
+}));
+
+function checkAuth(req, res, next) {
+  if (req.session && req.session.loggedIn) {
+    next();
+  } else {
+    res.redirect("/login");
+  }
+}
+
+const coinCategories = [
+  "0-19", "20-199", "200-499", "500-1000",
+  "Galaxy", "Interstellar", "Universale", "Abonnementje", "Tippie"
+];
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const category = req.body.category;
+    if (!coinCategories.includes(category)) {
+      return cb(new Error("Ongeldige categorie"));
+    }
+    const uploadPath = path.join("uploads", category);
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    }
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const name = path.basename(file.originalname, ext);
+    cb(null, name + "-" + Date.now() + ext);
+  }
+});
+const upload = multer({ storage });
+
+app.use(express.static("public"));
+app.use("/uploads", express.static("uploads"));
+app.use(express.urlencoded({ extended: true }));
+
+app.get("/login", (req, res) => {
+  res.sendFile(path.join(__dirname, "public/login.html"));
+});
+
+app.post("/login", (req, res) => {
+  const { password } = req.body;
+  if (password === PASSWORD) {
+    req.session.loggedIn = true;
+    res.redirect("/");
+  } else {
+    res.send("Verkeerd wachtwoord. <a href='/login'>Probeer opnieuw</a>");
+  }
+});
+
+app.get("/logout", (req, res) => {
+  req.session.destroy();
+  res.redirect("/login");
+});
+
+app.get("/", checkAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public/index.html"));
+});
+
+// Upload endpoint
+app.post("/upload", checkAuth, upload.single("audio"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).send("Geen bestand geüpload");
+  }
+  res.send(`Upload gelukt voor categorie "${req.body.category}"! <a href='/'>Terug</a> | <a href='/list'>Geluiden bekijken</a>`);
+});
+
+// Lijst van uploads per categorie
+app.get("/list", checkAuth, (req, res) => {
+  let html = "<h1>Geüploade sounds per categorie</h1>";
+  html += "<ul>";
+  coinCategories.forEach(cat => {
+    html += `<li><a href="/list/${cat}">${cat}</a></li>`;
+  });
+  html += "</ul>";
+  html += "<a href='/'>Terug naar upload</a> | <a href='/logout'>Uitloggen</a>";
+  res.send(html);
+});
+
+app.get("/list/:category", checkAuth, (req, res) => {
+  const category = req.params.category;
+  if (!coinCategories.includes(category)) {
+    return res.send("Ongeldige categorie");
+  }
+  const dir = path.join("uploads", category);
+  fs.readdir(dir, (err, files) => {
+    if (err) return res.send("Geen bestanden gevonden in deze categorie.");
+    let listHtml = `<h1>Geluiden voor categorie ${category}</h1><ul>`;
+    files.forEach(file => {
+      listHtml += `<li><a href="/uploads/${category}/${file}" download>${file}</a></li>`;
+    });
+    listHtml += "</ul><a href='/list'>Terug naar categorieën</a>";
+    res.send(listHtml);
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server draait op poort ${PORT}`);
+});
